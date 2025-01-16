@@ -1,8 +1,8 @@
+import mongodb from 'mongodb'
 import { dbService } from '../../services/db.service.js'
+import { kafkaService } from '../../services/kafka.service.js'
 import { logger } from '../../services/logger.service.js'
 
-import mongodb from 'mongodb'
-const { ObjectId } = mongodb
 
 export const userService = {
     query,
@@ -14,6 +14,7 @@ export const userService = {
     updateSavedPosts
 }
 
+const { ObjectId } = mongodb
 const BACKEND_PUBLIC_IMAGES_URL = process.env.NODE_ENV === 'true'
   ? '//localhost:3000/images/'
   : '/images/'
@@ -83,12 +84,19 @@ async function update(userId, userData) {
             savedPostIds: userData.savedPostIds,
         }
         const collection = await dbService.getCollection('user')
-        const updateResult = await collection.updateOne({ _id: ObjectId.createFromHexString(userId) }, { $set: fieldsToUpdate })
+        const updateResult = await collection.updateOne(
+            { _id: ObjectId.createFromHexString(userId) },
+            { $set: fieldsToUpdate }
+        )
+
         if (updateResult.acknowledged) {
-            const updatedUser = {
-              ...fieldsToUpdate,
-              _id: userId
-            }
+            const updatedUser = {_id: userId, ...fieldsToUpdate}
+
+            await kafkaService.emitEvent('user_events', {
+                type: "USER_UPDATED",
+                data: updatedUser
+            })
+
             return updatedUser
         }
         else {
@@ -134,7 +142,7 @@ async function updateSavedPosts(userId, postId) {
             { $addToSet: { savedPostIds: postId } })
 
             if (updateResult.acknowledged) {
-                return true 
+                return true
             }
             else {
                 throw new Error('Failed to update user');
